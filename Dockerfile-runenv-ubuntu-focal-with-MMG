@@ -1,0 +1,72 @@
+FROM ubuntu:focal
+# Set the working directory to /home
+WORKDIR /home
+# Create an apt configuration file to fix erroneous "hash sum mismatch" errors
+RUN printf "Acquire::http::Pipeline-Depth 0;\nAcquire::http::No-Cache true;\nAcquire::BrokenProxy true;" \
+    >> /etc/apt/apt.conf.d/99fixbadproxy
+# Add the necessary packages to compile Elmer/Ice
+RUN apt update -y -o Acquire::CompressionTypes::Order::=gz && apt upgrade -y
+RUN DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends \
+    build-essential \
+    git \
+    libblas-dev \
+    liblapack-dev \
+    libmumps-dev \
+    libparmetis-dev \
+    libhypre-dev \
+    gfortran \
+    mpich \
+    sudo \
+    cmake \
+    less \
+    apt-transport-https \
+    ca-certificates \
+    libpthread-stubs0-dev
+RUN apt-get update -y && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        make \
+        wget && \
+    rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /var/tmp && wget -q -nc --no-check-certificate -P /var/tmp https://cmake.org/files/v3.18/cmake-3.18.4-Linux-x86_64.sh && \
+    mkdir -p /usr/local && \
+    /bin/sh /var/tmp/cmake-3.18.4-Linux-x86_64.sh --prefix=/usr/local --skip-license && \
+    rm -rf /var/tmp/cmake-3.18.4-Linux-x86_64.sh
+ENV PATH=/usr/local/bin:$PATH
+# fetching Elmer source code, configuring and compiling
+RUN git clone https://github.com/ElmerCSC/elmerfem.git -b devel devel\
+        && mkdir devel/builddir \
+        && git clone https://www.github.com/MmgTools/mmg.git \
+        && cd mmg \
+        && mkdir build \
+        && cd build \
+        && cmake -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=TRUE ../ \
+        && make VERBOSE=1 -j$(nproc) \
+        && make install \
+        && cd ../../devel/builddir \
+        && cmake ../ -DCMAKE_C_COMPILER=/usr/bin/gcc \
+      -DCMAKE_INSTALL_PREFIX=/usr/local/elmer \
+      -DCMAKE_Fortran_COMPILER=/usr/bin/gfortran \
+      -DWITH_MPI:BOOL=TRUE \
+      -DWITH_LUA:BOOL=TRUE \
+      -DWITH_Mumps:BOOL=TRUE \
+      -DWITH_Hypre:BOOL=TRUE \
+      -DHypre_INCLUDE_DIR="/usr/include/hypre" \
+      -DWITH_Trilinos:BOOL=FALSE \
+      -DWITH_ELMERGUI:BOOL=FALSE \
+      -DWITH_ElmerIce:BOOL=FALSE \
+      -DMPIEXEC_PREFLAGS="--allow-run-as-root" \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DWITH_PARMMG:BOOL=TRUE \
+      -DWITH_MMG:BOOL=TRUE \
+      #-DPARMMGROOT="/usr/local" \
+      #-DMMG_INCLUDE_DIR="/usr/local/include" \
+      #-DPARMMMG_INCLUDE_DIR="/usr/local/include" \
+      #-DMMG_LIBRARY="/usr/local/lib/libmmg.a" \
+      && make VERBOSE=1 -j$(nproc) \
+      && make install \
+      && cd /home && rm -fr /home/devel && rm -fr /home/mmg \
+ENV PATH=$PATH:/usr/local/elmer/bin \
+    LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/elmer/share/elmersolver/lib
+
+#PARMMG_INCLUDE_DIR
+    
